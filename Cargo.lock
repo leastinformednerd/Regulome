@@ -51,6 +51,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mem"
+version = "0.1.0"
+
+[[package]]
 name = "regulome"
 version = "0.1.0"
 
