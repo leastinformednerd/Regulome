@@ -1,3 +1,5 @@
+#![no_std]
+
 use x86_64::{
     structures::paging::{
         PageTable,
@@ -89,12 +91,18 @@ pub fn create_recursive_page_table(index: usize) -> Result<RecursivePageTable<'s
     RecursivePageTable::new(page_table_ref).map_err(|_| RPTCE::NotRecursive)
 }
 
-trait FrameAllocator {
+pub trait FrameAllocator {
+    type AllocErrorType;
+    type DeallocErrorType;
+
     /// Must allocate `size` / `FRAME_SIZE` contiguous frames of memory and return the physical
     /// address at the start of that series, or an error if there isn't enough available memory
-    fn allocate(size: usize) -> Result<usize, ()>;
+    fn allocate(&mut self, size: usize) -> Result<usize, Self::AllocErrorType>;
 
-    fn deallocate(start_addr: usize) -> ();
+    /// Deallocates the stack frames starting at that address and frees it to be used 
+    /// The implementation of this trait needs to be able to know how many frames need to be
+    /// deallocated from a given address passed to this function
+    fn deallocate(&mut self, start_addr: usize) -> Result<usize, Self::DeallocErrorType>;
 }
 
 struct BootstrapFrameInfo {
@@ -104,9 +112,10 @@ struct BootstrapFrameInfo {
 
 /// A new, actually useful way of allocating physical memory to bootstrap the OS's memory
 /// management.
-/// Basically just hands out frames in massive bundles (or you can think of it as massive frames)
+/// Basically just hands out frames in massive bundles (or you can think of it as massive frames),
+/// altough bundles is more accurate to the way it works in reality
 pub struct BootstrapFrameManager {
-    frame_info: [FrameInfo; 4096]
+    frame_info: [BootstrapFrameInfo; 4096]
 }
 
 impl BootstrapFrameManager {
@@ -116,10 +125,8 @@ impl BootstrapFrameManager {
     /// Creates a new BootstrapFrameManager 
     fn new() -> Self {
         BootstrapFrameManager {
-            frame_info: core::array::from_fn(|index| 
-                FrameInfo {
-                    start_addr: index as u64 * Self::BLOCK_SIZE,
-                }
+            frame_info: core::array::from_fn(
+                |index| BootstrapFrameInfo {start_addr: index as u64 * Self::BLOCK_SIZE}
             )
         }
     }
@@ -145,6 +152,46 @@ impl BootstrapFrameManager {
     pub fn new_initialised<I>(existing: I) -> Self
     where I: Iterator<Item = (u64, u64)> {
         return Self::initialise_from_existing_mem_map(Self::new(), existing)
+    }
+}
+
+impl FrameAllocator for BootstrapFrameManager {
+    // These should definitely be enums but I'm turbo lazy and it shouldn't matter since, again
+    // these should get called maybe 10 times if you really tried to push it and also shouldn't
+    // fail. I would be extremely surprised if they did and the process should just panic when that
+    // occurs since something has gone very wrong.
+    type AllocErrorType = &'static str;
+    type DeallocErrorType = &'static str;
+
+    /// Linearly searches for an unused block of frames
+    /// Fails if there isn't one or `size` is greater than BLOCK_SIZE since no more than one block
+    /// should be needed to be allocated at a time and that assumption simplifies implementation
+    fn allocate(&mut self, size: usize) -> Result<usize, &'static str> {
+        if size as u64 > Self::BLOCK_SIZE {
+            return Err("Size was larger than one block (Self::BLOCK_SIZE)")
+        }
+        (&mut self.frame_info).into_iter()
+            .find(|addr| addr.start_addr >> 63 == 0)
+            .ok_or("Couldn't allocate a frame")
+            .map(|frame| {
+                let addr = frame.start_addr;
+                frame.start_addr = frame.start_addr | 1 << 63;
+                return addr as usize
+            })
+    }
+
+    fn deallocate(&mut self, addr: usize) -> Result<usize, &'static str>{
+        if addr % Self::BLOCK_SIZE as usize != 0 {
+           return Err("The provided address can't be correct since it isn't aligned on Self::BLOCK_SIZE")
+        }
+        
+        if self.frame_info[addr/Self::BLOCK_SIZE as usize].start_addr >> 63 == 0 {
+            return Err("The block at that address isn't currently allocated")
+        }
+        
+        self.frame_info[addr/Self::BLOCK_SIZE as usize].start_addr ^= 1 << 63;
+
+        return Ok(addr)
     }
 }
 
