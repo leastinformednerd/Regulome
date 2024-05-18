@@ -6,7 +6,10 @@ use x86_64::{
     structures::paging::{
         PageTable,
         RecursivePageTable,
-        PageTableFlags
+        Mapper,
+        PageTableFlags,
+        page::{Size4KiB, Page},
+        frame::PhysFrame
     },
     registers::control::Cr3,
     PhysAddr, VirtAddr
@@ -197,6 +200,17 @@ impl FrameAllocator for BootstrapFrameManager {
     }
 }
 
+unsafe impl x86_64::structures::paging::FrameAllocator<Size4KiB> for BootstrapFrameManager {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        return self.allocate(1)
+            .and_then(
+                |addr|PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new_truncate(addr as u64))
+                .or(Err(""))
+            )
+            .ok()
+    }
+}
+
 /// A trait to describe the interface by which the kernel can map pages into virtual memory. This
 /// means that the implementor must be able to get frames from somewhere (probably deffered to a
 /// FrameAllocator) and then map those frames into virtual memory by modifying a page table. It
@@ -205,13 +219,73 @@ pub trait MemoryMapper {
     type MapErrorType;
     type UnmapErrorType;
 
+    type MapAllocErrorType;
+
     /// The Ok arm of the return type should probably have a different associated type but I don't
     /// know that should be so it is what it is
-    fn map(&self, page: u64, frame: u64) -> Result<(), Self::MapErrorType>;
+    fn map(&mut self, page_table: &mut RecursivePageTable, page: u64, frame: u64) -> Result<(), Self::MapErrorType>;
 
     /// When it succeeds it should return the phyiscal address of associated frame so that it can
     /// be deallocated if needed.
-    fn unmap(&self, page: u64) -> Result<u64, Self::UnmapErrorType>;
+    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: u64) -> Result<u64, Self::UnmapErrorType>;
+
+    /// Get one or more frames (presumably from a FrameAllocator) and map them to a specific
+    /// location in virtual memory. I don't remember why this returns Ok(u64) but in the bootloader
+    /// implementation I had that return back the start of the page
+    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: u64, page_count: u32) -> Result<u64, Self::MapAllocErrorType>;
+}
+
+pub struct BootloaderMemoryMapper {
+    frame_allocator: BootstrapFrameManager
+}
+
+impl MemoryMapper for BootloaderMemoryMapper {
+    type MapErrorType = &'static str;
+    type UnmapErrorType = &'static str;
+
+    // This will probably be an enum in the kernel implementation but since I'm taking the sum of
+    // two identical types it's good enough to be &'static str
+    type MapAllocErrorType = &'static str;
+    
+    fn map(&mut self, page_table: &mut RecursivePageTable, page: u64, frame: u64) -> Result<(), &'static str> {
+        unsafe { match page_table.map_to(
+            Page::<Size4KiB>::from_start_address(VirtAddr::new(page)).or(Err("Page start not aligned correctly"))?,
+            PhysFrame::from_start_address(PhysAddr::new_truncate(frame)).or(Err("Frame start not aligned correctly"))?,
+            PageTableFlags::empty()
+                    | PageTableFlags::PRESENT
+                    | PageTableFlags::WRITABLE,
+            &mut self.frame_allocator
+        ) {
+            Ok(flusher) => {flusher.flush(); Ok(())},
+            Err(_) => Err("Unable to map the thingymabob")
+        } }
+    }
+
+    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: u64) -> Result<u64, &'static str> {
+        match page_table.unmap(
+            Page::<Size4KiB>::from_start_address(VirtAddr::new(page)).or(Err("Page start not aligned correctly"))?,
+        ) {
+            Ok((frame, flusher)) => {
+                flusher.flush();
+                Ok(frame.start_address().as_u64())
+            },
+            Err(_) => Err("Failed to unmap the page :/")
+        }
+    }
+
+    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: u64, page_count: u32) -> Result<u64, &'static str> {
+        let frame_block = self.frame_allocator.allocate(page_count * PAGE_SIZE)?;
+
+        for offset in 0..page_count {
+            self.map(
+                page_table,
+                page + offset * PAGE_SIZE,
+                frame_block + offset * FRAME_SIZE
+            )?
+        }
+
+        return Ok(page)
+    }
 }
 
 /// A trait to describe the interface by which the kernel can allocate and free memory requested by
@@ -220,6 +294,8 @@ pub trait MemoryMapper {
 ///     - map those memory frames into virtual memory
 ///     - find areas within pages to give to functions requesting allocation
 ///     - allocate new frames / pages as required to give programs space
+/// A lot of these will be deffered to other objects more closely related to the mapping of virtual
+/// memory and the allocation of frames
 pub trait KernelMemoryAllocator {
     type AllocErrorType;
     type FreeErrorType;
