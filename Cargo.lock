@@ -70,6 +70,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 name = "mem"
 version = "0.1.0"
 dependencies = [
+ "process",
  "x86_64",
 ]
 
@@ -81,6 +82,10 @@ checksum = "8ad3d49ab951a01fbaafe34f2ec74122942fe18a3f9814c3268f1bb72042131b"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "process"
+version = "0.1.0"
 
 [[package]]
 name = "ptr_meta"

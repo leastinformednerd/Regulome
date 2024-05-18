@@ -1,5 +1,7 @@
 #![no_std]
 
+use process::Process;
+
 use x86_64::{
     structures::paging::{
         PageTable,
@@ -195,7 +197,36 @@ impl FrameAllocator for BootstrapFrameManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// A trait to describe the interface by which the kernel can map pages into virtual memory. This
+/// means that the implementor must be able to get frames from somewhere (probably deffered to a
+/// FrameAllocator) and then map those frames into virtual memory by modifying a page table. It
+/// should work even if said page table is not active.
+pub trait MemoryMapper {
+    type MapErrorType;
+    type UnmapErrorType;
+
+    /// The Ok arm of the return type should probably have a different associated type but I don't
+    /// know that should be so it is what it is
+    fn map(&self, page: u64, frame: u64) -> Result<(), Self::MapErrorType>;
+
+    /// When it succeeds it should return the phyiscal address of associated frame so that it can
+    /// be deallocated if needed.
+    fn unmap(&self, page: u64) -> Result<u64, Self::UnmapErrorType>;
+}
+
+/// A trait to describe the interface by which the kernel can allocate and free memory requested by
+/// processes. This means it must be able to:
+///     - allocate physical memory frames to processes
+///     - map those memory frames into virtual memory
+///     - find areas within pages to give to functions requesting allocation
+///     - allocate new frames / pages as required to give programs space
+pub trait KernelMemoryAllocator {
+    type AllocErrorType;
+    type FreeErrorType;
+
+    fn allocate(&self, size: u64, process: &Process) -> Result<u64, Self::AllocErrorType>;
+
+    // The Ok arm of the return type should probably have a different associated type but I don't
+    // know what that would be so I'm leaving it as the empty type for now
+    fn free(&self, address: u64, process: &Process) -> Result<(), Self::FreeErrorType>;
 }
