@@ -8,8 +8,8 @@ use x86_64::{
     PhysAddr, VirtAddr
 };
 
-const PAGE_SIZE: usize = 4096;
-const FRAME_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
+pub const FRAME_SIZE: usize = 4096;
 
 pub enum RecursivePageTableCreationError {
     TooLarge,
@@ -89,71 +89,62 @@ pub fn create_recursive_page_table(index: usize) -> Result<RecursivePageTable<'s
     RecursivePageTable::new(page_table_ref).map_err(|_| RPTCE::NotRecursive)
 }
 
-#[derive(Clone, Copy)]
-struct PhysMemGaps {
-    start_addr: u64,
-    page_count: u32
+trait FrameAllocator {
+    /// Must allocate `size` / `FRAME_SIZE` contiguous frames of memory and return the physical
+    /// address at the start of that series, or an error if there isn't enough available memory
+    fn allocate(size: usize) -> Result<usize, ()>;
+
+    fn deallocate(start_addr: usize) -> ();
 }
 
-impl PhysMemGaps {
+struct BootstrapFrameInfo {
+    // The largest bit (1<<63) of `start_addr` is used to track if the frame is taken
+    start_addr: u64,
+}
+
+/// A new, actually useful way of allocating physical memory to bootstrap the OS's memory
+/// management.
+/// Basically just hands out frames in massive bundles (or you can think of it as massive frames)
+pub struct BootstrapFrameManager {
+    frame_info: [FrameInfo; 4096]
+}
+
+impl BootstrapFrameManager {
+    const BLOCK_SIZE: u64 = 33_418_117_120u64 / 4096;
+    pub const FRAMES_PER_BLOCKS: u64 = Self::BLOCK_SIZE / FRAME_SIZE as u64;
+
+    /// Creates a new BootstrapFrameManager 
     fn new() -> Self {
-        Self {
-            start_addr: 0,
-            page_count: 0
+        BootstrapFrameManager {
+            frame_info: core::array::from_fn(|index| 
+                FrameInfo {
+                    start_addr: index as u64 * Self::BLOCK_SIZE,
+                }
+            )
         }
     }
-}
 
-/// A struct to manage physical memory that lives on the stack (i.e *it's* not heap allocated)
-/// This is used to bootstrap an allocator that can use allocated memory
-///
-/// The generic parameter `N` determines the max size of the array that stores tracking infomation (12
-/// bytes). i.e `N` = 100 means that the array will be 12*100 = 1200 bytes big
-///
-/// It isn't good but who cares it needs to exist for about half of a second
-pub struct NonAllocatingStackFrameManager<const N: usize> {
-    head_ind: usize,
-    gaps: [PhysMemGaps; N]
-}
-
-impl<const N: usize> NonAllocatingStackFrameManager<N> {
-    /// Create a new NonAllocatingStackFrameManager
-    ///
-    /// # Arguments
-    /// * `memory_size` - The number of bytes in the system (or at least managed by the alloactor)
-    pub fn new(memory_size: u64 = 33_418_117_120) -> Self {
-        let mut ret = Self {
-            head_ind: 0,
-            gaps: [PhysMemGaps::new(); N]
-        };
-        
-        ret.gaps[0] = PhysMemGaps {
-            start_addr: 0,
-            page_count: memory_size / PAGE_SIZE as u64
-        };
-
-        ret
-    }
-
-    /// Allocates `size` bytes of contiguous memory somewhere and returns a pointer to the start of that block
-    /// Is really bad and should be blown up and the author killed but it gets called like 4 times.
-    pub fn allocate(&mut self, size: u64) -> u64 {
-        let page_count = size / PAGE_SIZE + if (size % PAGE_SIZE) != 0 {1} else {0};
+    /// From an iterator of (start address, size in bytes) initialises the frame manager to know
+    /// that those frames are taken. It's not good or smart but it doesn't need to be.
+    fn initialise_from_existing_mem_map<I>(mut target: Self, existing: I) -> Self
+    where I: Iterator<Item = (u64, u64)> {
+        for entry in existing {
+            let start_index = entry.0 / Self::BLOCK_SIZE; 
+            let num_blocks = entry.1 / Self::BLOCK_SIZE + if entry.1 % Self::BLOCK_SIZE != 0 {1} else {0};
             
-        let flag = true;
-
-        while (flag) {
-            if self.gaps[head].page_count != 0 && self.gaps[head].page_count > page_count {
-                return {
-                    // Why did I do it like this in a returning block?
-                    // Oh well can't be bothered doing it normally
-                    let addr = self.gaps[head].start_addr;
-                    self.gaps[head].page_count -= page_count;
-                    self.gaps[head].start_addr += page_count * PAGE_SIZE as u64;
-                    addr
-                }
+            let index = start_index;
+            while index < start_index + num_blocks {
+                target.frame_info[index as usize].start_addr = target.frame_info[index as usize].start_addr | 1<<63
             }
         }
+
+        return target
+    }
+
+    /// Constructs a new frame manager and initialises to be vaguely aware of existing allocated frames
+    pub fn new_initialised<I>(existing: I) -> Self
+    where I: Iterator<Item = (u64, u64)> {
+        return Self::initialise_from_existing_mem_map(Self::new(), existing)
     }
 }
 
