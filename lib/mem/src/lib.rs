@@ -296,6 +296,8 @@ impl MemoryMapper for BootloaderMemoryMapper {
 ///     - allocate new frames / pages as required to give programs space
 /// A lot of these will be deffered to other objects more closely related to the mapping of virtual
 /// memory and the allocation of frames
+/// 
+/// The backing implementation behind kmalloc() and kfree()
 pub trait KernelMemoryAllocator {
     type AllocErrorType;
     type FreeErrorType;
