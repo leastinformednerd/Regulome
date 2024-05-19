@@ -18,6 +18,8 @@ checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 name = "boot"
 version = "0.1.0"
 dependencies = [
+ "graphics",
+ "log",
  "uefi",
  "uefi-services",
 ]
@@ -41,6 +43,13 @@ name = "elf"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
+
+[[package]]
+name = "graphics"
+version = "0.1.0"
+dependencies = [
+ "uefi",
+]
 
 [[package]]
 name = "kern"
