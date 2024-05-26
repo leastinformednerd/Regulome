@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 log = {workspace = true}
 uefi = {workspace = true}
-uefi-services = "0.24.0"
+uefi-services = { version = "0.24.0",  features = ["panic_handler"]}
 graphics = {path = "../lib/graphics"}

@@ -17,9 +17,9 @@ use uefi::proto::console::gop::FrameBuffer;
 /// controlled by a higher level user-space available interface (that may or may not implement
 /// windows as a concept, at some point copium).
 pub struct CPUFrameBuffer {
-    width: usize,
-    height: usize,
-    buffer: Box<[u32]>
+    pub width: usize,
+    pub height: usize,
+    pub buffer: Box<[u32]>
 }
 
 impl CPUFrameBuffer {
