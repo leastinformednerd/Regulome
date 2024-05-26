@@ -23,4 +23,4 @@ Right now I'm working on the boot loader. To build and install that:
     -   There also needs to be a file named "font.bdf" in the root directory of the installation drive (the bootloader looks for certain hardcoded paths, currently on this is relavent, since we early exist before trying to load the kernel)
 
 ## Work that is not my own
-The code presented in this repository is all my own (although it uses the hard work of others with crates from crates.io). The only thing in this repository that is not my own is the font I am using ([Spleen](https://github.com/fcambus/spleen)) which is stored alongside it's associated license in the spleen/ directory
+The code presented in this repository is all my own (although it uses the hard work of others with crates from crates.io). The only thing in this repository that is not my own is the font I am using ([Spleen](https://github.com/fcambus/spleen)) which is stored alongside its associated license in the spleen/ directory
