@@ -5,6 +5,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
+use alloc::string::String;
+
 // These use statements should be collated together
 use log::info;
 use uefi::prelude::*;
@@ -22,7 +24,13 @@ mod bdf_loader;
 
 use bdf_loader::load_bdf_to_mono_font;
 
-use graphics::CPUFrameBuffer;
+use graphics::{CPUFrameBuffer, TextBuffer};
+
+const RED: u32 = 0xff00000;
+const GREEN: u32 = 0xff00;
+const BLUE: u32 = 0xff;
+const BLACK: u32 = 0;
+const WHITE: u32 = 0xffffff;
 
 /// Reads a file (passed as a handle) to an owned heap array and returns it
 fn read_file_from_handle(file_handle: FileHandle) -> Result<Vec<u8>, Status>{
@@ -49,6 +57,18 @@ fn read_file_from_handle(file_handle: FileHandle) -> Result<Vec<u8>, Status>{
     }
 
     return Ok(file_ram_location);
+}
+
+fn fill_frame_buffer(frame_buffer: &mut FrameBuffer, pixel: u32, height: usize, stride: usize){
+    for x in 0..stride {
+        for y in 0..height {
+            unsafe {
+                (frame_buffer.as_mut_ptr() as *mut u32)
+                .add(y * stride + x)
+                .write_volatile(pixel)
+            }
+        }
+    }
 }
 
 #[entry]
@@ -106,18 +126,24 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     info!("Loading the bdf file into a MonoFont struct");
 
-    // It turns out I haven't finished writing this yet so I will just comment it out 
-    /*
-    let mono_font = load_bdf_to_mono_font(
+    let mono_font = match load_bdf_to_mono_font(
         match alloc::str::from_utf8(font_bdf.as_slice()) {
             Ok(string) => string,
             Err(_) => return Status::ABORTED
         }
-    );
-    */
+    ) {
+        Ok(font) => font,
+        // I'm not entirely sure whether I need to do this since err_msg is &'static str so maybe I
+        // can just put it in info!(err_msg), but even if that's fine it should be the same outputted
+        // binary so it doesn't really matter
+        Err(err_msg) => {
+            info!("{err_msg}");
+            boot_services.stall(3_000_000);
+            return Status::ABORTED;
+        }
+    };
 
-    info!("Loaded the font\nGrabbing the GOP framebuffer"); 
-    boot_services.stall(1_000_000);
+    info!("Loaded the font\nGrabbing the GOP frame_buffer"); 
 
     let mut gop_handle = match boot_services.get_handle_for_protocol
         ::<GraphicsOutput>() {
@@ -125,7 +151,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         Err(err) => return err.status()
     };
 
-    info!("Loaded the gop handle. Now opening the protocol. The end of messages since open protocol exclusive, in fact exclusively opens the graphics protocol");
+    info!("Loaded the gop handle. Now opening the protocol. The end of messages since open protocol exclusive, in fact, exclusively opens the graphics protocol");
 
     let mut gop_protocol = match boot_services.open_protocol_exclusive
         ::<GraphicsOutput>(gop_handle){
@@ -152,25 +178,72 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     let mut frame_buffer = gop_protocol.frame_buffer(); 
 
-    const TEST_PIXEL: u32 = 0xffu32;
+    let (width, height) = mode.info().resolution();
+    let stride = mode.info().stride();
     
-    for offset_one in 0..200 {
-        for offset_two in 0..200 {
-            unsafe {
-                (frame_buffer.as_mut_ptr() as *mut u32)
-                    .add(offset_one * mode.info().stride() + offset_two)
-                    .write_volatile(TEST_PIXEL)
-            }
+    let mut cpu_frame_buffer = CPUFrameBuffer {
+        width: width, 
+        height: height, 
+        stride: stride,
+        buffer: {
+            let mut buf = Vec::with_capacity(stride*height);
+            buf.resize(stride*height, 0u32);
+            buf.into_boxed_slice()
         }
+    };
+    
+    let mut text_buffer = match TextBuffer::new(
+        // Dimensions of text buffer in glyphs
+        height / mono_font.height - 2,
+        width / mono_font.width - 2,
+        {
+            let mut tmp = String::with_capacity(
+                (height / mono_font.height - 2) * (width / mono_font.width - 2)
+            );
+
+            for _ in 0..(height / mono_font.height - 2) * (width / mono_font.width - 2) {
+                tmp.push(' ');
+            }
+
+            tmp.into_boxed_str()
+        }
+    ) {
+        Ok(buffer) => buffer,
+        Err(msg) => {
+            for x in 0..stride {
+                for y in 0..height {
+                    unsafe {
+                        (frame_buffer.as_mut_ptr() as *mut u32)
+                        .add(y * stride + x)
+                        .write_volatile(match msg {
+                            "The provided string must be ascii" => RED,
+                            "The provided string must have length equal to height * width" => BLUE,
+                            _ => GREEN
+                        })
+                    }
+                }
+            }
+            boot_services.stall(4_000_000);
+            return Status::ABORTED;
+        }
+    };
+
+    fill_frame_buffer(&mut frame_buffer, BLACK, stride, height);
+
+    // Because we don't have text yet it's hard to do any error reporting
+    if text_buffer.write_str("Hello world!").is_err() {
+        return Status::ABORTED
     }
 
-    // let mut cpu_frame_buffer = CPUFrameBuffer {
-    //    width: mode.info().
-    //};
+    if text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20)).is_err() {
+        return Status::ABORTED
+    }
+
+    cpu_frame_buffer.flush(&mut frame_buffer);
 
     // For testing I want to exit before trying to load the kernel
     boot_services.stall(10_000_000);
-    return Status::ABORTED;
+    return Status::SUCCESS;
 
     let kernel_path = match CStr16::from_str_with_buf("kernel.elf", &mut CStr16_buffer) {
         Ok(string) => string,

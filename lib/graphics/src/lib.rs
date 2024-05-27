@@ -15,10 +15,11 @@ use uefi::proto::console::gop::FrameBuffer;
 /// This shouldn't be directly accessed by user-space processes and instead be written to by the
 /// kernel when needed. This interface is particularly barebones since the access should be
 /// controlled by a higher level user-space available interface (that may or may not implement
-/// windows as a concept, at some point copium).
+/// windows as a concept [at some point copium]).
 pub struct CPUFrameBuffer {
     pub width: usize,
     pub height: usize,
+    pub stride: usize,
     pub buffer: Box<[u32]>
 }
 
@@ -47,38 +48,47 @@ impl CPUFrameBuffer {
         }
 
         if y + height > self.height {
-            return Err("The given y position + pixel map width would go off the screen")
+            return Err("The given y position + pixel map height would go off the screen")
         }
 
         if pixel_map.len() != width * height {
-            return Err("The pixel map dimensions do not agree with it's linear length")
+            return Err("The pixel map dimensions do not agree with its linear length")
         }
         unsafe {
-            let framebuf_base_addr = self.buffer.as_mut_ptr().add(y * self.width + x);
-            let pixmap_base_addr = pixel_map.as_ptr();
-            for row_index in 0..height { 
-                core::intrinsics::copy_nonoverlapping(
-                    // Source
-                    pixmap_base_addr.add(row_index * width),
-                    // Dest
-                    framebuf_base_addr.add(row_index * self.width),
-                    // Count
-                    width
-                )
+            let framebuf_base_addr = self.buffer.as_mut_ptr().add(y * self.stride + x) as *mut u32;
+            for row_index in 0..height {
+                for col_index in 0..width {
+                    framebuf_base_addr
+                        .add(row_index * self.stride + col_index)
+                        .write_volatile(pixel_map[row_index * width + col_index])
+                }
             }
         }
         Ok(())
+    }
+
+    // This is not particularly performant I think but I am not knowledgable enough to optimize it
+    pub fn flush(&self, framebuffer: &mut FrameBuffer) {
+        for x in 0..self.stride {
+            for y in 0..self.height {
+                unsafe {
+                    (framebuffer.as_mut_ptr() as *mut u32)
+                        .add(y * self.stride + x)
+                        .write_volatile(self.buffer[y * self.stride + x])
+                }
+            }
+        }
     }
 }
 
 /// An array of pixelmaps that all have the same width and height
 /// Has all the ascii printable characters (32 - 126)
 pub struct MonoFont {
-    characters: [
+    pub characters: [
         Box<[u32]>; 126-32
     ],
-    width: usize,
-    height: usize
+    pub width: usize,
+    pub height: usize
 }
 
 pub struct TextBuffer {
@@ -107,7 +117,7 @@ impl TextBuffer {
         }
 
         // Now we blank out the text by making it all spaces. This is just an aesthetic choice so
-        // any inputted string can be used to make an easy to use text buffer
+        // any correctly sized inputted string can be used to make an easy to use text buffer
         
         unsafe {
             for byte in text.as_bytes_mut() {
