@@ -179,7 +179,7 @@ impl TextBuffer {
                 self.shift_up();
                 return (0, y-1);
             } else {
-                self.cursor = (0, y+1);
+                self.cursor = (1, y+1);
             }
         } else {
             self.cursor = (x+1, y);

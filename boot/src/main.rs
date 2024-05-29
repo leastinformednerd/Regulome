@@ -231,13 +231,8 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     };
 
     // Because we don't have text yet it's hard to do any error reporting
-    if text_buffer.write_str("Hello world! Lorem\nIpsum\nDolor\netc, etc").is_err() 
-        || text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20)).is_err() {
-        fill_frame_buffer(&mut frame_buffer, RED, stride, height);
-    } else {
-        fill_frame_buffer(&mut frame_buffer, BLACK, stride, height);
-    };
-
+    let _ = text_buffer.write_str("Hello world!\nalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharacters");
+    let _ = text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20));
     cpu_frame_buffer.flush(&mut frame_buffer);
 
     // For testing I want to exit before trying to load the kernel
