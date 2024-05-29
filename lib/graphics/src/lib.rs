@@ -190,15 +190,13 @@ impl TextBuffer {
 
     /// Write a character at the current cursor position and then advance the cursor
     pub fn write_char(&mut self, character: char) -> Result<(), &'static str>{
-        if !character.is_ascii() || u32::from(character) > 126 || u32::from(character) < 32 {
-            return Err("The provided character must be a printable ASCII")
-        }
-        
         if character == '\n' {
-            self.cursor = (0, self.cursor.1 - 1);
-            self.shift_up();
-
+            self.cursor = (0, self.cursor.1 + 1);
             return Ok(())
+        }
+
+        if (!character.is_ascii() || u32::from(character) > 126 || u32::from(character) < 32) {
+            return Err("The provided character must be a printable ASCII")
         }
         
         unsafe {
@@ -230,7 +228,8 @@ impl TextBuffer {
             return Err("The framebuffer is too short for the text ")
         }
 
-        for (index, character) in self.text.chars().enumerate() {
+        for (index, character) in self.text.chars()
+            .enumerate() {
             let glyph = font.characters.get(
                 // 32 is the start of the ascii printable characters block and can therefore be
                 // used to calculate the offset into the glyph array.
@@ -246,6 +245,43 @@ impl TextBuffer {
                 (index % self.width) * font.width + padding.0,
                 index / self.width * font.height + padding.1
             )?
+        }
+
+        Ok(())
+    }
+
+    pub fn dbg_print_cursor(&mut self) -> Result<(), &'static str> {
+        let cursor = self.cursor;
+        self.cursor = (0, 0);
+        
+        let usize_digit_to_char = |digit: usize| {
+            match digit{
+                0 => Ok('0'),
+                1 => Ok('1'),
+                2 => Ok('2'),
+                3 => Ok('3'),
+                4 => Ok('4'),
+                5 => Ok('5'),
+                6 => Ok('6'),
+                7 => Ok('7'),
+                8 => Ok('8'),
+                9 => Ok('9'),
+                _ => Err("")
+            }
+        };
+
+        for offset in 0..=cursor.0.ilog10() {
+            self.write_char(
+                usize_digit_to_char((cursor.0 / (10usize.saturating_pow(offset)) % 10))?
+            )?;
+        }
+        
+        self.write_char(',');
+
+        for offset in 0..=cursor.1.ilog10() {
+            self.write_char(
+                usize_digit_to_char((cursor.1 / (10usize.saturating_pow(offset)) % 10))?
+            )?;
         }
 
         Ok(())

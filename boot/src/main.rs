@@ -181,6 +181,8 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let (width, height) = mode.info().resolution();
     let stride = mode.info().stride();
     
+    fill_frame_buffer(&mut frame_buffer, WHITE, stride, height);
+
     let mut cpu_frame_buffer = CPUFrameBuffer {
         width: width, 
         height: height, 
@@ -228,16 +230,13 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
     };
 
-    fill_frame_buffer(&mut frame_buffer, BLACK, stride, height);
-
     // Because we don't have text yet it's hard to do any error reporting
-    if text_buffer.write_str("Hello world!").is_err() {
-        return Status::ABORTED
-    }
-
-    if text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20)).is_err() {
-        return Status::ABORTED
-    }
+    if text_buffer.write_str("Hello world! Lorem\nIpsum\nDolor\netc, etc").is_err() 
+        || text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20)).is_err() {
+        fill_frame_buffer(&mut frame_buffer, RED, stride, height);
+    } else {
+        fill_frame_buffer(&mut frame_buffer, BLACK, stride, height);
+    };
 
     cpu_frame_buffer.flush(&mut frame_buffer);
 
