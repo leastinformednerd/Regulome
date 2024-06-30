@@ -223,16 +223,16 @@ pub trait MemoryMapper {
 
     /// The Ok arm of the return type should probably have a different associated type but I don't
     /// know that should be so it is what it is
-    fn map(&mut self, page_table: &mut RecursivePageTable, page: u64, frame: u64) -> Result<(), Self::MapErrorType>;
+    fn map(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr, frame: PhysAddr) -> Result<(), Self::MapErrorType>;
 
     /// When it succeeds it should return the phyiscal address of associated frame so that it can
     /// be deallocated if needed.
-    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: u64) -> Result<u64, Self::UnmapErrorType>;
+    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr) -> Result<PhysAddr, Self::UnmapErrorType>;
 
     /// Get one or more frames (presumably from a FrameAllocator) and map them to a specific
     /// location in virtual memory. I don't remember why this returns Ok(u64) but in the bootloader
     /// implementation I had that return back the start of the page
-    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: u64, page_count: u32) -> Result<u64, Self::MapAllocErrorType>;
+    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr, page_count: u32) -> Result<u64, Self::MapAllocErrorType>;
 }
 
 pub struct BootloaderMemoryMapper {
@@ -247,10 +247,10 @@ impl MemoryMapper for BootloaderMemoryMapper {
     // two identical types it's good enough to be &'static str
     type MapAllocErrorType = &'static str;
     
-    fn map(&mut self, page_table: &mut RecursivePageTable, page: u64, frame: u64) -> Result<(), &'static str> {
+    fn map(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr, frame: PhysAddr) -> Result<(), &'static str> {
         unsafe { match page_table.map_to(
-            Page::<Size4KiB>::from_start_address(VirtAddr::new(page)).or(Err("Page start not aligned correctly"))?,
-            PhysFrame::from_start_address(PhysAddr::new_truncate(frame)).or(Err("Frame start not aligned correctly"))?,
+            Page::<Size4KiB>::from_start_address(page).or(Err("Page start not aligned correctly"))?,
+            PhysFrame::from_start_address(frame).or(Err("Frame start not aligned correctly"))?,
             PageTableFlags::empty()
                     | PageTableFlags::PRESENT
                     | PageTableFlags::WRITABLE,
@@ -261,9 +261,9 @@ impl MemoryMapper for BootloaderMemoryMapper {
         } }
     }
 
-    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: u64) -> Result<u64, &'static str> {
+    fn unmap(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr) -> Result<PhysAddr, &'static str> {
         match page_table.unmap(
-            Page::<Size4KiB>::from_start_address(VirtAddr::new(page)).or(Err("Page start not aligned correctly"))?,
+            Page::<Size4KiB>::from_start_address(page).or(Err("Page start not aligned correctly"))?,
         ) {
             Ok((frame, flusher)) => {
                 flusher.flush();
@@ -273,13 +273,13 @@ impl MemoryMapper for BootloaderMemoryMapper {
         }
     }
 
-    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: u64, page_count: u32) -> Result<u64, &'static str> {
+    fn map_alloc(&mut self, page_table: &mut RecursivePageTable, page: VirtAddr, page_count: u32) -> Result<u64, &'static str> {
         let frame_block = self.frame_allocator.allocate(page_count * PAGE_SIZE)?;
 
-        for offset in 0..page_count {
+        for offset in 0..page_count as u64{
             self.map(
                 page_table,
-                page + offset * PAGE_SIZE,
+                page + offset * PAGE_SIZE as u64,
                 frame_block + offset * FRAME_SIZE
             )?
         }
@@ -302,7 +302,10 @@ pub trait KernelMemoryAllocator {
     type AllocErrorType;
     type FreeErrorType;
 
-    fn allocate(&self, size: u64, process: &Process) -> Result<u64, Self::AllocErrorType>;
+    /// Allocates `size` bytes aligned at `alignment` bytes on the heap on behalf of the `process`
+    /// Returns the a pointer to that memory as NonNull<[u8]> (similar to the way that
+    /// alloc::Alocator works)
+    fn allocate(&self, size: u64, alignment: u64, process: &Process) -> Result<core::ptr::NonNull<[u8]>, Self::AllocErrorType>;
 
     // The Ok arm of the return type should probably have a different associated type but I don't
     // know what that would be so I'm leaving it as the empty type for now

@@ -60,28 +60,34 @@ fn read_file_from_handle(file_handle: FileHandle) -> Result<Vec<u8>, Status>{
 }
 
 fn fill_frame_buffer(frame_buffer: &mut FrameBuffer, pixel: u32, height: usize, stride: usize){
-    for x in 0..stride {
-        for y in 0..height {
+    for y in 0..height {
+        let offset = y * stride;
+        for x in 0..stride {
             unsafe {
                 (frame_buffer.as_mut_ptr() as *mut u32)
-                .add(y * stride + x)
+                .add(offset + x)
                 .write_volatile(pixel)
             }
         }
     }
 }
 
+/*unsafe*/ fn print(message: &str, text_buffer: &mut TextBuffer, cpu_frame_buffer: &mut CPUFrameBuffer, frame_buffer_ptr: *mut u8, mono_font: &graphics::MonoFont)
+    -> Result<(), &'static str> {
+    text_buffer.write_str(message)?;
+    text_buffer.write_pixels(cpu_frame_buffer, mono_font, (20,20))?;
+    cpu_frame_buffer.flush(frame_buffer_ptr as *mut u32);
+    Ok(())
+}
+
 #[entry]
 fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     uefi_services::init(&mut system_table).unwrap();
- 
-    let boot_services = system_table.boot_services();
-
     // Read the relavent information files into ram
    
     info!("Getting file system handle");
 
-    let fs_handle = match boot_services.get_image_file_system(image_handle){
+    let fs_handle = match system_table.boot_services().get_image_file_system(image_handle){
         Ok(handle) => handle,
         Err(err) => return err.status()
     };
@@ -138,14 +144,14 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         // binary so it doesn't really matter
         Err(err_msg) => {
             info!("{err_msg}");
-            boot_services.stall(3_000_000);
+            system_table.boot_services().stall(3_000_000);
             return Status::ABORTED;
         }
     };
 
     info!("Loaded the font\nGrabbing the GOP frame_buffer"); 
 
-    let mut gop_handle = match boot_services.get_handle_for_protocol
+    let mut gop_handle = match system_table.boot_services().get_handle_for_protocol
         ::<GraphicsOutput>() {
         Ok(handle) => handle,
         Err(err) => return err.status()
@@ -153,13 +159,13 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     info!("Loaded the gop handle. Now opening the protocol. The end of messages since open protocol exclusive, in fact, exclusively opens the graphics protocol");
 
-    let mut gop_protocol = match boot_services.open_protocol_exclusive
+    let mut gop_protocol = match system_table.boot_services().open_protocol_exclusive
         ::<GraphicsOutput>(gop_handle){
         Ok(proto) => proto,
         Err(err) => return err.status()
     };
 
-    let mut mode = match gop_protocol.query_mode(0, boot_services) {
+    let mut mode = match gop_protocol.query_mode(0, system_table.boot_services()) {
         Ok(mode) => mode,
         Err(err) => return err.status()
     };
@@ -177,12 +183,10 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     }
 
     let mut frame_buffer = gop_protocol.frame_buffer(); 
-
+    
     let (width, height) = mode.info().resolution();
     let stride = mode.info().stride();
     
-    fill_frame_buffer(&mut frame_buffer, WHITE, stride, height);
-
     let mut cpu_frame_buffer = CPUFrameBuffer {
         width: width, 
         height: height, 
@@ -195,7 +199,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     };
     
     let mut text_buffer = match TextBuffer::new(
-        // Dimensions of text buffer in glyphs
+        // Dimensions of text buffer in glyphs, with -2 to account for the padding
         height / mono_font.height - 2,
         width / mono_font.width - 2,
         {
@@ -225,23 +229,22 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
                     }
                 }
             }
-            boot_services.stall(4_000_000);
+            system_table.boot_services().stall(4_000_000);
             return Status::ABORTED;
         }
     };
-
-    // Because we don't have text yet it's hard to do any error reporting
-    let _ = text_buffer.write_str("Hello world!\nalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharactersalotofcharacters");
-    let _ = text_buffer.write_pixels(&mut cpu_frame_buffer, &mono_font, (20,20));
-    cpu_frame_buffer.flush(&mut frame_buffer);
-
-    // For testing I want to exit before trying to load the kernel
-    boot_services.stall(10_000_000);
-    return Status::SUCCESS;
-
+    
     let kernel_path = match CStr16::from_str_with_buf("kernel.elf", &mut CStr16_buffer) {
         Ok(string) => string,
-        Err(_) => return Status::ABORTED
+        Err(_) => {
+            print("Couldn't convert rust str to CStr16\n",
+                &mut text_buffer,
+                &mut cpu_frame_buffer,
+                frame_buffer.as_mut_ptr(),
+                &mono_font);
+            system_table.boot_services().stall(3_000_000);
+            return Status::ABORTED
+        }
     };
 
     let kernel_handle = match root_dir.open(
@@ -251,14 +254,37 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         uefi::proto::media::file::FileAttribute::READ_ONLY
     ) {
         Ok(handle) => handle,
-        Err(err) => return err.status()
+        Err(err) => {
+            print("Failed to open a file at /kernel.elf\n",
+                &mut text_buffer,
+                &mut cpu_frame_buffer,
+                frame_buffer.as_mut_ptr(),
+                &mono_font);
+            system_table.boot_services().stall(3_000_000);
+            return err.status() 
+        }
     };
 
     let kernel = match read_file_from_handle(kernel_handle) {
         Ok(kernel) => kernel,
-        Err(status) => return status
+        Err(status) => {
+            print("Failed to read the data at the file handle into memory\n",
+                &mut text_buffer,
+                &mut cpu_frame_buffer,
+                frame_buffer.as_mut_ptr(),
+                &mono_font);
+            system_table.boot_services().stall(3_000_000);
+            return status 
+        }
     };
 
-    system_table.boot_services().stall(10_000_000);
+    print("Loaded kernel file into memory,\nnow it needs to be loaded as an elf file.",
+        &mut text_buffer,
+        &mut cpu_frame_buffer,
+        frame_buffer.as_mut_ptr(),
+        &mono_font);
+
+    system_table.boot_services().stall(3_000_000);
+
     Status::SUCCESS
 }

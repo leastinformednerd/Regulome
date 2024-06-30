@@ -57,10 +57,12 @@ impl CPUFrameBuffer {
         unsafe {
             let framebuf_base_addr = self.buffer.as_mut_ptr().add(y * self.stride + x) as *mut u32;
             for row_index in 0..height {
+                let row_frame_offset = row_index * self.stride;
+                let row_pixmap_offset = row_index * width;
                 for col_index in 0..width {
                     framebuf_base_addr
-                        .add(row_index * self.stride + col_index)
-                        .write_volatile(pixel_map[row_index * width + col_index])
+                        .add( row_frame_offset + col_index)
+                        .write_volatile(pixel_map[row_pixmap_offset + col_index])
                 }
             }
         }
@@ -68,11 +70,11 @@ impl CPUFrameBuffer {
     }
 
     // This is not particularly performant I think but I am not knowledgable enough to optimize it
-    pub fn flush(&self, framebuffer: &mut FrameBuffer) {
+    pub fn flush(&self, framebuffer: *mut u32) {
         for x in 0..self.stride {
             for y in 0..self.height {
                 unsafe {
-                    (framebuffer.as_mut_ptr() as *mut u32)
+                    framebuffer
                         .add(y * self.stride + x)
                         .write_volatile(self.buffer[y * self.stride + x])
                 }
