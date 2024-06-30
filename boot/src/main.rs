@@ -278,13 +278,12 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
     };
 
-    print("Loaded kernel file into memory,\nnow it needs to be loaded as an elf file.",
+    print("Loaded kernel file into memory, now it needs to be loaded as an elf file.",
         &mut text_buffer,
         &mut cpu_frame_buffer,
         frame_buffer.as_mut_ptr(),
         &mono_font);
-
+    text_buffer.dbg_print_cursor();
     system_table.boot_services().stall(3_000_000);
-
     Status::SUCCESS
 }

@@ -175,16 +175,14 @@ impl TextBuffer {
     fn next(&mut self) -> (usize, usize){
         let (x,y) = self.cursor;
         
-        if x == self.width {
-            if y == self.height{
-                self.cursor = (0, y);
+        match (x==self.width, y==self.height) {
+            (false, _) => self.cursor = (x+1, y),
+            (true, false)  => self.cursor = (1, y+1),
+            (true, true) => {
+                self.cursor = (0,y);
                 self.shift_up();
                 return (0, y-1);
-            } else {
-                self.cursor = (1, y+1);
-            }
-        } else {
-            self.cursor = (x+1, y);
+            },
         }
 
         return (x,y);
@@ -193,7 +191,12 @@ impl TextBuffer {
     /// Write a character at the current cursor position and then advance the cursor
     pub fn write_char(&mut self, character: char) -> Result<(), &'static str>{
         if character == '\n' {
-            self.cursor = (0, self.cursor.1 + 1);
+            if self.cursor.1 + 1 == self.height {
+                self.shift_up();
+                self.cursor.0 = 0;
+            } else {
+                self.cursor = (0, self.cursor.1 + 1);
+            }
             return Ok(())
         }
 
@@ -272,7 +275,7 @@ impl TextBuffer {
             }
         };
 
-        for offset in 0..=cursor.0.ilog10() {
+        for offset in 0..1+cursor.0.ilog10() {
             self.write_char(
                 usize_digit_to_char((cursor.0 / (10usize.saturating_pow(offset)) % 10))?
             )?;
@@ -280,7 +283,7 @@ impl TextBuffer {
         
         self.write_char(',');
 
-        for offset in 0..=cursor.1.ilog10() {
+        for offset in 0..1+cursor.1.ilog10() {
             self.write_char(
                 usize_digit_to_char((cursor.1 / (10usize.saturating_pow(offset)) % 10))?
             )?;
