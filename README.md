@@ -7,4 +7,6 @@ What I think makes Regulome interesting as a design is the (planned and not yet 
 All processses in both kernel-space and user-space either 'promote' or 'inhibit' related processes. This works similarly to how biological cis- and trans- regulatory elements in cells modulate the expression of proteins, hence the name and the inspiration (I like the thought that in a sense the transcription related cell machinery is a form of scheduler).
 
 ## Work that is not my own
-The code presented in this repository is all my own (although it uses the hard work of others with crates from crates.io). The only thing in this repository that is not my own is the font I am using ([Spleen](https://github.com/fcambus/spleen)) which is stored alongside its associated license in the spleen/ directory
+The work in this repository that is not my own (other than crates I am using through cargo) are:
+    - The spleen font (located in ./spleen/)
+    - The kernel linker script (located at ./kern/linker.ld), which is taken from the limine-rust-template repository (I do not yet know how to write a good linker script)
