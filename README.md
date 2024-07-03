@@ -8,5 +8,7 @@ All processses in both kernel-space and user-space either 'promote' or 'inhibit'
 
 ## Work that is not my own
 The work in this repository that is not my own (other than crates I am using through cargo) are:
-    - The spleen font (located in ./spleen/)
-    - The kernel linker script (located at ./kern/linker.ld), which is taken from the limine-rust-template repository (I do not yet know how to write a good linker script)
+   
+   - The spleen font (located in ./spleen/)
+   
+   spleen- The kernel linker script (located at ./kern/linker.ld), which is taken from the limine-rust-template repository (I do not yet know how to write a good linker script)
