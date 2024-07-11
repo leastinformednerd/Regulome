@@ -1,4 +1,7 @@
 # Regulome
+
+For reasons of personal enjoyment this has been shelved and currently all my kernel dev is in: https://github.com/leastinformednerd/Kernel-Experiments
+
 Shared repository for a pure rust x86\_64 kernel (Regulome) / its uefi bootloader (unnamed..., and at this point as I want to work on the kernel I will be using Limine and the bootloader is shelved)
 
 ## About Regulome
